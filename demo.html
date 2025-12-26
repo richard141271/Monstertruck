@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="nb">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Birøkter Voice Demo</title>
+    <style>
+        body {
+            font-family: 'Courier New', Courier, monospace;
+            background-color: #1a1a1a;
+            color: #00ff00;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            padding: 20px;
+        }
+        #status {
+            font-size: 1.2rem;
+            margin-bottom: 20px;
+            color: #ffff00;
+        }
+        #output {
+            border: 2px solid #00ff00;
+            padding: 20px;
+            width: 90%;
+            height: 300px;
+            overflow-y: auto;
+            background-color: #000;
+            font-size: 1.1rem;
+            line-height: 1.5;
+        }
+        button {
+            margin-top: 20px;
+            padding: 15px 30px;
+            font-size: 1.2rem;
+            background-color: #00ff00;
+            color: #000;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+            border-radius: 5px;
+        }
+        .command-match {
+            color: #00ffff;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="status">KLAR FOR STEMMEKOMMANDO...</div>
+    <div id="output">
+        > System initiert.<br>
+        > Trykk START for å aktivere mikrofon.<br>
+        > (Hvis mikrofon ikke virker, kan du skrive kommandoer under)<br>
+        > Prøv å si/skrive: "Start inspeksjon", "Fant dronning", "Kube 17".
+    </div>
+    
+    <div style="display: flex; gap: 10px; width: 90%; max-width: 600px; margin-top: 20px;">
+        <button onclick="startListening()" style="flex: 1;">🎤 START LYTTING</button>
+    </div>
+    
+    <div style="margin-top: 20px; display: flex; gap: 10px; width: 90%; max-width: 600px;">
+        <input type="text" id="manual-input" placeholder="Skriv kommando her hvis mikrofon feiler..." 
+               style="flex: 1; padding: 15px; font-size: 1rem; background: #333; color: #00ff00; border: 1px solid #00ff00;">
+        <button onclick="manualSend()" style="padding: 15px;">SEND</button>
+    </div>
+
+    <script>
+        const outputDiv = document.getElementById('output');
+        const statusDiv = document.getElementById('status');
+        let recognition;
+
+        function log(text, isCommand = false) {
+            const line = document.createElement('div');
+            line.innerHTML = `> ${text}`;
+            if (isCommand) line.className = 'command-match';
+            outputDiv.appendChild(line);
+            outputDiv.scrollTop = outputDiv.scrollHeight;
+        }
+
+        function manualSend() {
+            const input = document.getElementById('manual-input');
+            const text = input.value.toLowerCase().trim();
+            if (text) {
+                log(`MANUELL: "${text}"`);
+                processCommand(text);
+                input.value = '';
+            }
+        }
+
+        // Allow Enter key
+        document.getElementById('manual-input').addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') {
+                manualSend();
+            }
+        });
+
+        function startListening() {
+            if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+                alert("Nettleseren blokkerer tale-til-tekst. Dette skjer ofte hvis siden ikke har HTTPS (hengelås). Du kan teste logikken ved å SKRIVE kommandoer i feltet nederst i stedet.");
+                statusDiv.innerText = "STEMME IKKE TILGJENGELIG";
+                return;
+            }
+
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            recognition = new SpeechRecognition();
+            
+            recognition.lang = 'nb-NO'; // Norsk bokmål
+            recognition.continuous = true; // Fortsett å lytte
+            recognition.interimResults = false; // Kun ferdige setninger
+
+            recognition.onstart = () => {
+                statusDiv.innerText = "LYTTER... (Snakk nå)";
+                log("Mikrofon aktivert.");
+            };
+
+            recognition.onresult = (event) => {
+                const lastResult = event.results[event.results.length - 1];
+                const text = lastResult[0].transcript.toLowerCase().trim();
+                
+                processCommand(text);
+            };
+
+            recognition.onerror = (event) => {
+                statusDiv.innerText = "FEIL: " + event.error;
+            };
+
+            recognition.onend = () => {
+                statusDiv.innerText = "Lytting pauset.";
+                // Auto-restart for "always on" feel
+                // recognition.start(); 
+            };
+
+            recognition.start();
+        }
+
+        function processCommand(text) {
+            // Enkel "AI" logikk for å kjenne igjen kommandoer
+            if (text.includes("start inspeksjon")) {
+                log("KOMMANDO: Starter inspeksjonsmodus...", true);
+                speak("Inspeksjon startet. Hvilken kube?");
+            } 
+            else if (text.includes("kube") || text.includes("nummer")) {
+                log(`LOGG: Identifiserer kube fra tale: "${text}"`, true);
+            }
+            else if (text.includes("dronning")) {
+                log("OBSERVASJON: 👑 Dronning observert!", true);
+                speak("Dronning registrert.");
+            }
+            else if (text.includes("sykdom") || text.includes("råte")) {
+                log("ALARM: ⚠️ Mulig sykdomstegn registrert!", true);
+                speak("Advarsel. Tar bilde for analyse.");
+            }
+            else if (text.includes("ferdig") || text.includes("avslutt")) {
+                log("KOMMANDO: Avslutter økt.", true);
+                speak("Inspeksjon ferdig. Lagrer data.");
+            }
+            else {
+                log(`Notat: "${text}"`);
+            }
+        }
+
+        function speak(text) {
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = 'nb-NO';
+            window.speechSynthesis.speak(utterance);
+        }
+    </script>
+</body>
+</html>

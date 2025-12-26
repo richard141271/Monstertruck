@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="nb">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monstertruck Samler</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" href="icon.png" type="image/png">
+    <link rel="apple-touch-icon" href="icon.png">
+    <link rel="stylesheet" href="style.css">
+    <!-- Firebase JS SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, getDocs, updateDoc, deleteDoc, doc, query, where, orderBy } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js";
+        
+        // Make Firebase functions available globally for app.js (since app.js is not a module yet)
+        // Ideally we should refactor app.js to be a module, but for now we expose the SDK parts we need.
+        window.firebaseModules = {
+            initializeApp,
+            getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut,
+            getFirestore, collection, addDoc, getDocs, updateDoc, deleteDoc, doc, query, where, orderBy,
+            getStorage, ref, uploadBytes, getDownloadURL
+        };
+    </script>
+    <!-- jsPDF for PDF generation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
+</head>
+<body>
+
+    <header>
+        <h1>Monstertruck Samler</h1>
+        <nav id="main-nav" class="hidden">
+            <button onclick="showSection('view-collection')">Samling</button>
+            <button onclick="showSection('view-add')">Ny Truck</button>
+            <button onclick="showSection('view-summary')">Oversikt</button>
+            <button onclick="logout()">Logg ut</button>
+        </nav>
+    </header>
+
+    <main>
+        <!-- Auth Section -->
+        <section id="view-auth">
+            <h2>Logg inn / Registrer</h2>
+            <form id="auth-form">
+                <label for="email">E-post</label>
+                <input type="email" id="email" required placeholder="din@epost.no">
+                
+                <label for="password">PIN-kode (4 siffer)</label>
+                <input type="password" id="password" required maxlength="4" pattern="[0-9]*" inputmode="numeric" placeholder="****">
+                
+                <div class="auth-buttons">
+                    <button type="submit" id="login-btn">Logg inn</button>
+                    <button type="button" id="register-btn" onclick="handleRegister()">Registrer ny bruker</button>
+                </div>
+            </form>
+            <p id="auth-message"></p>
+        </section>
+
+        <!-- Collection View -->
+        <section id="view-collection" class="hidden">
+            <div class="controls">
+                <h2>Min Samling</h2>
+                <div class="view-toggles">
+                    <button onclick="setCollectionView('grid')">Rutenett</button>
+                    <button onclick="setCollectionView('list')">Liste</button>
+                </div>
+                <button onclick="generatePDF()">Last ned PDF</button>
+            </div>
+            
+            <div class="search-bar">
+                <input type="text" id="search-input" placeholder="Søk i samling (navn, år, serie...)" oninput="filterTrucks()">
+            </div>
+
+            <div id="collection-container" class="grid-view">
+                <!-- Trucks will be injected here -->
+                <p>Laster...</p>
+            </div>
+        </section>
+
+        <!-- Add/Edit Truck View -->
+        <section id="view-add" class="hidden">
+            <h2 id="form-title">Registrer ny truck</h2>
+            <form id="truck-form">
+                <input type="hidden" id="truck-id">
+                
+                <label for="name">Navn på truck *</label>
+                <input type="text" id="name" required>
+
+                <label for="series">Serie / Modell</label>
+                <input type="text" id="series" placeholder="F.eks. Monster Jam 2024">
+
+                <div class="row">
+                    <div>
+                        <label for="year">Produsentår</label>
+                        <select id="year">
+                            <option value="">Velg år...</option>
+                            <!-- Populated by JS -->
+                        </select>
+                    </div>
+                    <div>
+                        <label for="count">Antall i besittelse</label>
+                        <input type="number" id="count" value="1" min="1">
+                    </div>
+                </div>
+
+                <div class="row">
+                    <div>
+                        <label for="price">Pris kjøpt (kr)</label>
+                        <input type="number" id="price" min="0">
+                    </div>
+                    <div>
+                        <label for="value">Verdi i dag (kr)</label>
+                        <input type="number" id="value" min="0">
+                    </div>
+                </div>
+
+                <label for="purchase_date">Kjøpsdato</label>
+                <input type="date" id="purchase_date">
+
+                <label for="rarity">Rarity-tag</label>
+                <select id="rarity">
+                    <option value="Standard">Standard</option>
+                    <option value="Sommer">Sommer</option>
+                    <option value="Vinter">Vinter</option>
+                    <option value="Limited Edition">Limited Edition</option>
+                    <option value="Jubileum">Jubileum</option>
+                    <option value="Sjeldent funn">Sjeldent funn</option>
+                </select>
+
+                <label for="status">Status</label>
+                <select id="status">
+                    <option value="collection">I samling</option>
+                    <option value="for_sale">Til salgs</option>
+                    <option value="sold">Solgt</option>
+                    <option value="wishlist">Ønskeliste</option>
+                </select>
+
+                <label for="condition">Tilstand</label>
+                <select id="condition">
+                    <option value="Ny">Ny</option>
+                    <option value="Brukt – som ny">Brukt – som ny</option>
+                    <option value="Brukt – normal slitasje">Brukt – normal slitasje</option>
+                    <option value="Brukt – tydelige merker">Brukt – tydelige merker</option>
+                </select>
+
+                <label class="checkbox-label">
+                    <input type="checkbox" id="box">
+                    Med original eske
+                </label>
+
+                <label for="notes">Notater / Minner</label>
+                <textarea id="notes" rows="3"></textarea>
+
+                <label for="image">Bilde</label>
+                <input type="file" id="image" accept="image/*">
+                <div id="image-preview"></div>
+
+                <button type="submit" class="primary-btn">Lagre Truck</button>
+                <button type="button" onclick="showSection('view-collection')" class="secondary-btn">Avbryt</button>
+                <button type="button" id="delete-btn" class="danger-btn hidden" onclick="handleDeleteTruck()">Slett</button>
+            </form>
+        </section>
+
+        <!-- Summary View -->
+        <section id="view-summary" class="hidden">
+            <h2>Oversikt</h2>
+            <div class="stats-card">
+                <h3>Totalt antall trucker</h3>
+                <p id="stat-count" class="stat-value">0</p>
+            </div>
+            <div class="stats-card">
+                <h3>Samlet innkjøpskostnad</h3>
+                <p id="stat-cost" class="stat-value">0 kr</p>
+            </div>
+            <div class="stats-card">
+                <h3>Samlet verdi</h3>
+                <p id="stat-value" class="stat-value">0 kr</p>
+            </div>
+            <div class="stats-card">
+                <h3>Verdiøkning</h3>
+                <p id="stat-increase" class="stat-value">0 kr</p>
+            </div>
+        </section>
+
+        <!-- Import View (New) -->
+        <section id="view-import" class="hidden">
+            <h2>Kopier Samling</h2>
+            <p>Velg truckene du vil importere til din egen samling.</p>
+            
+            <div class="import-controls">
+                <label>
+                    <input type="checkbox" id="import-select-all" checked onchange="toggleImportAll(this)"> Velg alle
+                </label>
+                <div class="import-buttons">
+                    <button onclick="executeImport()" class="primary-btn">Importer valgte</button>
+                    <button onclick="cancelImport()" class="secondary-btn">Hopp over</button>
+                </div>
+            </div>
+
+            <div id="import-container" class="list-view">
+                <!-- Import items injected here -->
+            </div>
+        </section>
+
+    </main>
+
+    <script src="app.js?v=9"></script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('./sw.js')
+                .then(reg => console.log('Service Worker registered'))
+                .catch(err => console.log('Service Worker failed', err));
+        }
+    </script>
+</body>
+</html>
